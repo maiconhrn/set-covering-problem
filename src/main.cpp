@@ -61,6 +61,7 @@ int main() {
 
     scp scp_problem = scp();
     scp_problem.read(std::cin);
+    scp_problem.run_genetics();
 
 //    clock_t end = clock();
 
