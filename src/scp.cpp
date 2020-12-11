@@ -4,6 +4,19 @@
 
 #include "scp.hpp"
 
+bool a_less_b(const double &a, const double &b) {
+    return std::fabs(a - b) > 1.0e-05 && a < b;
+
+}
+
+int random_int_in_range(int a, int b) {
+    static std::random_device rd;
+    static std::mt19937 mt(rd());
+    std::uniform_int_distribution<int> dist(a, b);
+
+    return dist(mt);
+}
+
 scp::column::column() {
     this->index = -1;
     this->cost = 0;
@@ -24,10 +37,10 @@ scp::line::line() {
 }
 
 
-std::unordered_map<int, struct scp::line *> scp::intersect_by_key(
-        const std::unordered_map<int, struct scp::line *> &a,
-        const std::unordered_map<int, struct scp::line *> &b) {
-    auto res = std::unordered_map<int, struct scp::line *>();
+std::map<int, struct scp::line *> scp::intersect_by_key(
+        const std::map<int, struct scp::line *> &a,
+        const std::map<int, struct scp::line *> &b) {
+    auto res = std::map<int, struct scp::line *>();
 
     for (auto &it : a) {
         if (b.find(it.first) != b.end()) {
@@ -38,10 +51,10 @@ std::unordered_map<int, struct scp::line *> scp::intersect_by_key(
     return res;
 }
 
-std::unordered_map<int, struct scp::column *> scp::intersect_by_key(
-        const std::unordered_map<int, struct scp::column *> &a,
-        const std::unordered_map<int, struct scp::column *> &b) {
-    auto res = std::unordered_map<int, struct scp::column *>();
+std::map<int, struct scp::column *> scp::intersect_by_key(
+        const std::map<int, struct scp::column *> &a,
+        const std::map<int, struct scp::column *> &b) {
+    auto res = std::map<int, struct scp::column *>();
 
     for (auto &it : a) {
         if (b.find(it.first) != b.end()) {
@@ -52,15 +65,15 @@ std::unordered_map<int, struct scp::column *> scp::intersect_by_key(
     return res;
 }
 
-scp::column *scp::line::min_column(const std::unordered_map<int, struct scp::line *> &uncovered_lines) {
+scp::column *scp::line::min_column(const std::map<int, struct scp::line *> &uncovered_lines) {
     auto *column = this->covered_by_columns.begin()->second;
 
     for (auto &it : this->covered_by_columns) {
-        if ((it.second->cost
-             / (float) intersect_by_key(uncovered_lines,
-                                        it.second->covered_lines).size())
-            < (column->cost / (float) intersect_by_key(uncovered_lines,
-                                                       column->covered_lines).size())) {
+        if (a_less_b((it.second->cost
+                      / (double) intersect_by_key(uncovered_lines,
+                                                  it.second->covered_lines).size()),
+                     (column->cost / (double) intersect_by_key(uncovered_lines,
+                                                               column->covered_lines).size()))) {
             column = it.second;
         }
     }
@@ -156,52 +169,81 @@ void scp::read(std::istream &in) {
 
 scp::solution scp::generate_individuous() {
     auto solution = scp::solution();
-    auto uncovered_lines = std::unordered_map<int, struct scp::line *>(this->lines.begin(),
-                                                                       this->lines.end());
-
-    std::random_device rd;
-    std::mt19937 mt(rd());
-    std::uniform_int_distribution<int> dist(1, n_lines);
+    auto uncovered_lines =
+            std::map<int, struct scp::line *>(this->lines.begin(),
+                                              this->lines.end());
+    std::map<int, struct scp::line *>::iterator it;
 
     while (!uncovered_lines.empty()) {
-        std::unordered_map<int, struct scp::line *>::iterator it;
-        while ((it = uncovered_lines.find(dist(mt))) == uncovered_lines.end());
-        auto line = it->second;
-        auto column = line->min_column(uncovered_lines);
+        it = uncovered_lines.begin();
+        std::advance(it, random_int_in_range(0, (int) uncovered_lines.size() - 1));
+        auto *line = it->second;
+        auto *column = line->min_column(uncovered_lines);
 
-        solution.columns.insert({column->index, column});
-        for (auto &covered_line : column->covered_lines) {
-            uncovered_lines.erase(covered_line.first);
+        for (auto &item : column->covered_lines) {
+            uncovered_lines.erase(item.first);
+            solution.columns_cover_line[item.first]++;
         }
+        solution.insert_column(column);
     }
 
     return solution;
 }
 
-std::vector<struct scp::solution> scp::generate_initial_population() {
-    auto pop = std::vector<struct scp::solution>();
+void scp::erase_redundancy(scp::solution &individuous) {
+    auto to_verify = std::map<int, struct column *>(individuous.columns.begin(),
+                                                    individuous.columns.end());
+
+    std::map<int, struct column *>::iterator it;
+    while (!to_verify.empty()) {
+        it = to_verify.begin();
+        std::advance(it, random_int_in_range(0, (int) to_verify.size() - 1));
+        auto *column = it->second;
+
+        to_verify.erase(it);
+
+        bool reduntancy = true;
+        for (auto &item : column->covered_lines) {
+            if (individuous.columns_cover_line[item.first] < 2) {
+                reduntancy = false;
+            }
+        }
+        if (reduntancy) {
+            individuous.columns.erase(column->index);
+            for (auto &item : column->covered_lines) {
+                individuous.columns_cover_line[item.first]--;
+            }
+        }
+    }
+}
+
+std::set<struct scp::solution, scp::population_cmp> scp::generate_initial_population() {
+    auto pop = std::set<struct scp::solution, scp::population_cmp>();
 
     while (pop.size() < N_POP) {
-        pop.push_back(generate_individuous());
+        auto individuous = generate_individuous();
+        erase_redundancy(individuous);
+        pop.insert(individuous);
     }
 
     return pop;
 }
 
-float scp::fitness(scp::solution individuous) {
-    return individuous.cost();
+double scp::fitness(scp::solution &individuous) {
+    return individuous.cost;
 }
 
-scp::column *scp::min_column(const std::unordered_map<int, struct scp::line *> &uncovered_lines,
-                             const std::unordered_map<int, struct scp::column *> &cols) {
+scp::column *scp::min_column(const std::map<int, struct scp::line *> &uncovered_lines,
+                             const std::map<int, struct scp::column *> &cols) {
     auto *column = cols.begin()->second;
 
-    for (auto &it : columns) {
-        if ((it.second->cost
-             / (float) intersect_by_key(uncovered_lines,
-                                        it.second->covered_lines).size())
-            < (column->cost / (float) intersect_by_key(uncovered_lines,
-                                                       column->covered_lines).size())) {
+    for (auto &it : cols) {
+        if (a_less_b((it.second->cost
+                      / (double) intersect_by_key(uncovered_lines,
+                                                  it.second->covered_lines).size()),
+                     (column->cost
+                      / (double) intersect_by_key(uncovered_lines,
+                                                  column->covered_lines).size()))) {
             column = it.second;
         }
     }
@@ -209,93 +251,114 @@ scp::column *scp::min_column(const std::unordered_map<int, struct scp::line *> &
     return column;
 }
 
-scp::solution scp::cross(std::vector<struct scp::solution> population) {
-    std::sort(population.begin(), population.end(), [&population](const scp::solution &a,
-                                                                  const scp::solution &b) {
-        auto npop = (N_POP * (N_POP + 1));
-        auto criteria = [&population, &npop](const scp::solution &s) {
-            return (2 * std::distance(population.begin(),
-                                      std::find(population.begin(),
-                                                population.end(),
-                                                s)))
-                   / npop;
-        };
-
-        return criteria(a) < criteria(b);
-    });
-
-    auto chromosome_x = population.begin();
-    auto chromosome_y = ++population.begin();
+scp::solution scp::cross(std::set<struct scp::solution, scp::population_cmp> population) {
+    auto chromosome_x = population.rbegin();
+    auto chromosome_y = std::next(population.rbegin());
     auto chromosome_aux = scp::solution();
     chromosome_aux.columns.insert(chromosome_x->columns.begin(),
                                   chromosome_x->columns.end());
+    chromosome_aux.cost += chromosome_x->cost;
     chromosome_aux.columns.insert(chromosome_y->columns.begin(),
                                   chromosome_y->columns.end());
+    chromosome_aux.cost += chromosome_y->cost;
+    chromosome_aux.columns_cover_line.insert(chromosome_x->columns_cover_line.begin(),
+                                             chromosome_x->columns_cover_line.end());
+    chromosome_aux.columns_cover_line.insert(chromosome_y->columns_cover_line.begin(),
+                                             chromosome_y->columns_cover_line.end());
 
     auto chromosome_z = scp::solution();
 
-    auto uncovered_lines = std::unordered_map<int, struct scp::line *>(this->lines.begin(),
-                                                                       this->lines.end());
+    auto uncovered_lines = std::map<int, struct scp::line *>(this->lines.begin(),
+                                                             this->lines.end());
 
-    std::random_device rd;
-    std::mt19937 mt(rd());
-    std::uniform_int_distribution<int> dist(1, n_lines);
-
+    std::map<int, struct scp::line *>::iterator it;
     while (!uncovered_lines.empty()) {
-        std::unordered_map<int, struct scp::line *>::iterator it;
-        while ((it = uncovered_lines.find(dist(mt))) == uncovered_lines.end());
-        auto line = it->second;
-        auto column = min_column(uncovered_lines,
-                                 intersect_by_key(line->covered_by_columns,
-                                                  chromosome_aux.columns));
+        it = uncovered_lines.begin();
+        std::advance(it, random_int_in_range(0, (int) uncovered_lines.size() - 1));
+        auto *line = it->second;
+        auto *column = min_column(uncovered_lines,
+                                  intersect_by_key(line->covered_by_columns,
+                                                   chromosome_aux.columns));
 
-        chromosome_z.columns.insert({column->index, column});
+        chromosome_z.insert_column(column);
         for (auto &covered_line : column->covered_lines) {
             uncovered_lines.erase(covered_line.first);
+            chromosome_z.columns_cover_line[covered_line.first]++;
         }
     }
 
+    erase_redundancy(chromosome_z);
 
     return chromosome_z;
 }
 
-scp::solution scp::mutate(scp::solution individuous) {
-    std::random_device rd;
-    std::mt19937 mt(rd());
-    std::uniform_int_distribution<int> dist0(0, 1);
-    std::uniform_int_distribution<int> dist1(1, n_columns);
+void scp::mutate(scp::solution &individuous) {
+    if (random_int_in_range(0, 1)) {
+        auto n = neighbor(individuous);
 
-    for (int i = 0; i < dist0(mt) * individuous.columns.size(); ++i) {
-        auto *column = this->columns[dist1(mt)];
+        erase_redundancy(individuous);
 
-        individuous.columns.insert({column->index, column});
+        individuous.cost = n.cost;
+        individuous.columns = n.columns;
+        individuous.columns_cover_line = n.columns_cover_line;
     }
-
-    return individuous;
 }
 
-scp::solution scp::best_fitness(std::vector<struct solution> population) {
-    auto best = *population.begin();
 
-    for (auto &it : population) {
-        if (fitness(it) < fitness(best)) {
-            best = it;
-        }
+scp::solution scp::neighbor(scp::solution &individuous) {
+    auto neighbor = scp::solution();
+    neighbor.columns.insert(individuous.columns.begin(),
+                            individuous.columns.end());
+    neighbor.cost = individuous.cost;
+    neighbor.columns_cover_line.insert(individuous.columns_cover_line.begin(),
+                                       individuous.columns_cover_line.end());
+
+    auto *column = this->columns[random_int_in_range(1, n_columns)];
+
+    neighbor.insert_column(column);
+    for (auto &it : column->covered_lines) {
+        neighbor.columns_cover_line[it.first]++;
     }
 
-    return best;
+    erase_redundancy(individuous);
+
+    return neighbor;
 }
 
-scp::solution scp::worst_fitness(std::vector<struct solution> population) {
-    auto worst = *population.begin();
+void scp::local_search(solution &individuous) {
+    auto best_local = scp::solution();
+    best_local.columns.insert(individuous.columns.begin(),
+                              individuous.columns.end());
+    best_local.cost = individuous.cost;
+    best_local.columns_cover_line.insert(individuous.columns_cover_line.begin(),
+                                         individuous.columns_cover_line.end());
+    auto neighborhood = std::set<struct solution, population_cmp>();
+    bool retry = false;
 
-    for (auto &it : population) {
-        if (fitness(it) > fitness(worst)) {
-            worst = it;
+    do {
+        for (int i = 0; i < 100; i++) {
+            neighborhood.insert(neighbor(best_local));
         }
-    }
 
-    return worst;
+        if (a_less_b(neighborhood.rbegin()->cost, best_local.cost)) {
+            best_local = *neighborhood.rbegin();
+            retry = true;
+        } else {
+            retry = false;
+        }
+    } while (retry);
+
+    individuous.cost = best_local.cost;
+    individuous.columns = best_local.columns;
+    individuous.columns_cover_line = best_local.columns_cover_line;
+}
+
+scp::solution scp::best_fitness(std::set<struct solution, scp::population_cmp> &population) {
+    return *population.rbegin();
+}
+
+scp::solution scp::worst_fitness(std::set<struct solution, scp::population_cmp> &population) {
+    return *population.begin();
 }
 
 void scp::run_genetics() {
@@ -316,25 +379,70 @@ void scp::run_genetics() {
     while (i <= N_MAX) {
         auto candidate = cross(population);
 
-        candidate = mutate(candidate);
+        mutate(candidate);
+
+//        local_search(candidate);
 
         auto worst = worst_fitness(population);
 
-        if (fitness(candidate) < fitness(worst)) {
-            population.erase(std::find(population.begin(),
-                                       population.end(),
-                                       worst));
-            population.push_back(candidate);
+        if (a_less_b(fitness(candidate), fitness(worst))) {
+            population.erase(population.find(worst));
+            population.insert(candidate);
 
             i = 0;
         } else {
             i++;
         }
 
-        cout << i << endl
-             << "Best: " << best_fitness(population).cost() << endl
-             << "Worst: " << worst_fitness(population).cost() << endl;
+        cout << "i: " << i << endl
+             << "Best: " << best_fitness(population).cost << endl
+             << "Worst: " << worst_fitness(population).cost << endl
+             << "Pop size: " << population.size() << endl
+             << "Time: " << double(clock() - begin) / CLOCKS_PER_SEC << "s" << endl;
     }
+}
+
+void scp::run_genetics_local_search() {
+//    Gerar população inicial
+//    while critério-de-parada do
+//    Avaliação: Calcula a qualidade dos cromossomos filhos
+//    Seleção: Escolher cromossomos reprodutores
+//    Cruzamento: Fazer o cruzamento dos reprodutores
+//    Mutação: Gerar mutações da população
+//    Busca local: Fazer busca na vizinhança da solução (cromossomo)s
+//    Atualização: Atualizar a população
+//    end-while
+
+
+    auto population = generate_initial_population();
+
+    int i = 0;
+    while (i <= N_MAX) {
+        auto candidate = cross(population);
+
+        mutate(candidate);
+
+        local_search(candidate);
+
+        auto worst = worst_fitness(population);
+
+        if (a_less_b(fitness(candidate), fitness(worst))) {
+            population.erase(population.find(worst));
+            population.insert(candidate);
+
+            i = 0;
+        } else {
+            i++;
+        }
+
+//        cout << "i: " << i << endl
+//             << "Best: " << best_fitness(population).cost << endl
+//             << "Worst: " << worst_fitness(population).cost << endl
+//             << "Pop size: " << population.size() << endl
+//             << "Time: " << double(clock() - begin) / CLOCKS_PER_SEC << "s" << endl;
+    }
+
+    result = best_fitness(population);
 }
 
 bool scp::solution::operator==(const scp::solution &rhs) const {
@@ -345,14 +453,26 @@ bool scp::solution::operator!=(const scp::solution &rhs) const {
     return !(rhs == *this);
 }
 
-float scp::solution::cost() {
-    if (_cost == -1) {
-        _cost = 0;
+void scp::solution::insert_column(scp::column *column) {
+    this->cost += column->cost;
 
-        for (auto &it : this->columns) {
-            _cost += it.second->cost;
+    this->columns.insert({column->index, column});
+}
+
+void scp::solution::erase_column(column column) {
+    this->cost -= column.cost;
+
+    this->columns.erase(column.index);
+}
+
+scp::column scp::solution::worst_fitness_column() {
+    auto worst = *this->columns.begin()->second;
+
+    for (auto &it : this->columns) {
+        if (a_less_b(worst.cost, it.second->cost)) {
+            worst = *it.second;
         }
     }
 
-    return _cost;
+    return worst;
 }
