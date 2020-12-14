@@ -58,11 +58,11 @@ void process_mem_usage(double &vm_usage, double &resident_set) {
  */
 int main(int argc, char *argv[]) {
     clock_t begin = clock();
-
-    cout << 1 << endl;
+    
     scp scp_problem = scp();
     scp_problem.read(std::cin);
     scp_problem.run_genetics_local_search();
+    cout << "Melhor custo: " << scp_problem.result.cost << endl;
 
     clock_t end = clock();
 

@@ -25,6 +25,7 @@ class scp {
 private:
     const static short N_POP = 100;
     const static short N_MAX = 1000;
+    const static short N_LS = 100;
 
     struct line;
 

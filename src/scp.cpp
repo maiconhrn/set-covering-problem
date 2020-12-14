@@ -336,7 +336,7 @@ void scp::local_search(solution &individuous) {
     bool retry = false;
 
     do {
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < N_LS; i++) {
             neighborhood.insert(neighbor(best_local));
         }
 
